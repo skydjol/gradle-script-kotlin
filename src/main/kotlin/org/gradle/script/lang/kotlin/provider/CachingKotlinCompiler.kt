@@ -7,7 +7,6 @@ import org.gradle.cache.internal.CacheKeyBuilder.CacheKeySpec
 import org.gradle.internal.classloader.VisitableURLClassLoader
 import org.gradle.internal.classpath.ClassPath
 import org.gradle.internal.classpath.DefaultClassPath
-import org.gradle.internal.hash.HashUtil.createCompactMD5
 
 import org.gradle.script.lang.kotlin.KotlinBuildScript
 
@@ -37,9 +36,7 @@ class CachingKotlinCompiler(
         return compileWithCache(cacheKeyPrefix + buildscript, classPath, parentClassLoader) { outputDir ->
             compileKotlinScriptToDirectory(
                 outputDir,
-                File(outputDir.parentFile, "buildscript-section.gradle.kts").apply {
-                    writeText(buildscript)
-                },
+                buildscriptSectionFileFor(buildscript, outputDir),
                 scriptDefinitionFromTemplate(KotlinBuildScriptSection::class, classPath),
                 parentClassLoader, logger)
         }
@@ -58,23 +55,37 @@ class CachingKotlinCompiler(
                                  classPath: ClassPath,
                                  parentClassLoader: ClassLoader,
                                  compileTo: (File) -> Class<*>): Class<*> {
-        val cacheKey = cacheKeyBuilder.build(cacheKeySpec + classPath)
         val cacheDir = cacheRepository
-            .cache(cacheKey)
+            .cache(cacheKeyFor(cacheKeySpec + classPath))
             .withProperties(mapOf("version" to "1"))
+            .withInitializer { cache ->
                 logger.info("Kotlin compilation classpath: {}", classPath)
-                val scriptClass = compileTo(classesDir(it.baseDir))
-                scriptClassNameFile(it.baseDir).writeText(scriptClass.name)
+                val cacheDir = cache.baseDir
+                val scriptClass = compileTo(classesDirOf(cacheDir))
+                writeClassNameTo(cacheDir, scriptClass.name)
             }.open().run {
                 close()
                 baseDir
             }
-        return loadClassFrom(classesDir(cacheDir), scriptClassNameFile(cacheDir).readText(), parentClassLoader)
+        return loadClassFrom(classesDirOf(cacheDir), readClassNameFrom(cacheDir), parentClassLoader)
     }
+
+    private fun buildscriptSectionFileFor(buildscript: String, outputDir: File) =
+        File(outputDir.parentFile, "buildscript-section.gradle.kts").apply {
+            writeText(buildscript)
+        }
+
+    private fun cacheKeyFor(spec: CacheKeySpec) = cacheKeyBuilder.build(spec)
+
+    private fun writeClassNameTo(cacheDir: File, className: String) =
+        scriptClassNameFile(cacheDir).writeText(className)
+
+    private fun readClassNameFrom(cacheDir: File) =
+        scriptClassNameFile(cacheDir).readText()
 
     private fun scriptClassNameFile(cacheDir: File) = File(cacheDir, "script-class-name")
 
-    private fun classesDir(cacheDir: File) = File(cacheDir, "classes")
+    private fun classesDirOf(cacheDir: File) = File(cacheDir, "classes")
 
     private fun loadClassFrom(classesDir: File, scriptClassName: String, classLoader: ClassLoader) =
         VisitableURLClassLoader(classLoader, classPathOf(classesDir)).loadClass(scriptClassName)
