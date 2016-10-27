@@ -61,6 +61,7 @@ class CachingKotlinCompiler(
         val cacheKey = cacheKeyBuilder.build(cacheKeySpec + classPath)
         val cacheDir = cacheRepository
             .cache(cacheKey)
+            .withProperties(mapOf("version" to "1"))
                 logger.info("Kotlin compilation classpath: {}", classPath)
                 val scriptClass = compileTo(classesDir(it.baseDir))
                 scriptClassNameFile(it.baseDir).writeText(scriptClass.name)
