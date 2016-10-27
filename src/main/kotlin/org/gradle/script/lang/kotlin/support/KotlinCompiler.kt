@@ -50,8 +50,6 @@ import org.slf4j.Logger
 
 import java.io.File
 
-import java.lang.IllegalStateException
-
 internal
 fun compileKotlinScript(scriptFile: File,
                         scriptDef: KotlinScriptDefinition,
@@ -60,6 +58,27 @@ fun compileKotlinScript(scriptFile: File,
     withRootDisposable { rootDisposable ->
         withMessageCollectorFor(log) { messageCollector ->
             val configuration = compilerConfigurationFor(messageCollector, scriptFile).apply {
+                setModuleName("buildscript")
+                addScriptDefinition(scriptDef)
+            }
+            val environment = kotlinCoreEnvironmentFor(configuration, rootDisposable)
+            return compileScript(environment, classLoader)
+                ?: throw IllegalStateException("Internal error: unable to compile script, see log for details")
+        }
+    }
+}
+
+internal
+fun compileKotlinScriptToDirectory(outputDirectory: File,
+                                   scriptFile: File,
+                                   scriptDef: KotlinScriptDefinition,
+                                   classLoader: ClassLoader,
+                                   log: Logger): Class<*> {
+    withRootDisposable { rootDisposable ->
+        withMessageCollectorFor(log) { messageCollector ->
+            val configuration = compilerConfigurationFor(messageCollector, scriptFile).apply {
+                put(JVMConfigurationKeys.RETAIN_OUTPUT_IN_MEMORY, true)
+                put(OUTPUT_DIRECTORY, outputDirectory)
                 setModuleName("buildscript")
                 addScriptDefinition(scriptDef)
             }
