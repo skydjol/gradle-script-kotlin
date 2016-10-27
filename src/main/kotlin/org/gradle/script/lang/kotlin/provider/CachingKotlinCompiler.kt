@@ -1,6 +1,8 @@
 package org.gradle.script.lang.kotlin.provider
 
 import org.gradle.cache.CacheRepository
+import org.gradle.cache.internal.CacheKeyBuilder
+import org.gradle.cache.internal.CacheKeyBuilder.CacheKeySpec
 
 import org.gradle.internal.classloader.VisitableURLClassLoader
 import org.gradle.internal.classpath.ClassPath
@@ -19,16 +21,20 @@ import java.io.File
 
 import kotlin.reflect.KClass
 
-class CachingKotlinCompiler(val cacheRepository: CacheRepository) {
+class CachingKotlinCompiler(
+    val cacheKeyBuilder: CacheKeyBuilder,
+    val cacheRepository: CacheRepository) {
 
     private val logger = loggerFor<KotlinScriptPluginFactory>()
+
+    private val cacheKeyPrefix = CacheKeySpec.withPrefix("gradle-script-kotlin")
 
     fun compileBuildscriptSectionOf(scriptFile: File,
                                     buildscriptRange: IntRange,
                                     classPath: ClassPath,
                                     parentClassLoader: ClassLoader): Class<*> {
         val buildscript = scriptFile.readText().substring(buildscriptRange)
-        return compileWithCache(createCompactMD5(buildscript), classPath, parentClassLoader) { outputDir ->
+        return compileWithCache(cacheKeyPrefix + buildscript, classPath, parentClassLoader) { outputDir ->
             compileKotlinScriptToDirectory(
                 outputDir,
                 File(outputDir.parentFile, "buildscript-section.gradle.kts").apply {
@@ -40,7 +46,7 @@ class CachingKotlinCompiler(val cacheRepository: CacheRepository) {
     }
 
     fun compileBuildScript(scriptFile: File, classPath: ClassPath, parentClassLoader: ClassLoader): Class<*> =
-        compileWithCache(hashOf(scriptFile), classPath, parentClassLoader) { outputDir ->
+        compileWithCache(cacheKeyPrefix + scriptFile, classPath, parentClassLoader) { outputDir ->
             compileKotlinScriptToDirectory(
                 outputDir,
                 scriptFile,
@@ -48,16 +54,13 @@ class CachingKotlinCompiler(val cacheRepository: CacheRepository) {
                 parentClassLoader, logger)
         }
 
-    private fun hashOf(scriptFile: File) = createCompactMD5(scriptFile.readText())
-
-    private fun compileWithCache(cacheKey: String,
+    private fun compileWithCache(cacheKeySpec: CacheKeySpec,
                                  classPath: ClassPath,
                                  parentClassLoader: ClassLoader,
                                  compileTo: (File) -> Class<*>): Class<*> {
-        // TODO: add classPath to cacheKey
+        val cacheKey = cacheKeyBuilder.build(cacheKeySpec + classPath)
         val cacheDir = cacheRepository
-            .cache("gradle-script-kotlin/$cacheKey")
-            .withInitializer {
+            .cache(cacheKey)
                 logger.info("Kotlin compilation classpath: {}", classPath)
                 val scriptClass = compileTo(classesDir(it.baseDir))
                 scriptClassNameFile(it.baseDir).writeText(scriptClass.name)
