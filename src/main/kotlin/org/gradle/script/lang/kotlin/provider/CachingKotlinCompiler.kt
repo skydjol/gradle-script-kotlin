@@ -56,7 +56,7 @@ class CachingKotlinCompiler(
                                  parentClassLoader: ClassLoader,
                                  compileTo: (File) -> Class<*>): Class<*> {
         val cacheDir = cacheRepository
-            .cache(cacheKeyFor(cacheKeySpec + classPath))
+            .cache(cacheKeyFor(cacheKeySpec + parentClassLoader))
             .withProperties(mapOf("version" to "1"))
             .withInitializer { cache ->
                 logger.info("Kotlin compilation classpath: {}", classPath)
