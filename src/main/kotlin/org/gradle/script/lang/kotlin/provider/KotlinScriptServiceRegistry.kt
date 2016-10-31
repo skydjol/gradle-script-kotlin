@@ -16,6 +16,7 @@
 
 package org.gradle.script.lang.kotlin.provider
 
+import org.gradle.StartParameter
 import org.gradle.api.internal.ClassPathRegistry
 import org.gradle.api.internal.artifacts.dsl.dependencies.DependencyFactory
 import org.gradle.api.internal.cache.GeneratedGradleJarCache
@@ -50,8 +51,11 @@ class KotlinScriptServiceRegistry : PluginServiceRegistry {
 
         @Suppress("unused")
         private fun createCachingKotlinCompiler(cacheKeyBuilder: CacheKeyBuilder,
-                                                cacheRepository: CacheRepository) =
-            CachingKotlinCompiler(cacheKeyBuilder, cacheRepository)
+                                                cacheRepository: CacheRepository,
+                                                progressLoggerFactory: ProgressLoggerFactory,
+                                                startParameters: StartParameter) =
+            CachingKotlinCompiler(
+                cacheKeyBuilder, cacheRepository, progressLoggerFactory, startParameters.isRecompileScripts)
 
         @Suppress("unused")
         private fun createKotlinScriptClassPathProvider(

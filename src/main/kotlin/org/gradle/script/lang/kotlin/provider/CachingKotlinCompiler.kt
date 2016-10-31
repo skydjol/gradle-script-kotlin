@@ -23,6 +23,7 @@ import org.gradle.cache.internal.CacheKeyBuilder.CacheKeySpec
 import org.gradle.internal.classloader.VisitableURLClassLoader
 import org.gradle.internal.classpath.ClassPath
 import org.gradle.internal.classpath.DefaultClassPath
+import org.gradle.internal.logging.progress.ProgressLoggerFactory
 
 import org.gradle.script.lang.kotlin.KotlinBuildScript
 
@@ -38,7 +39,9 @@ import kotlin.reflect.KClass
 
 class CachingKotlinCompiler(
     val cacheKeyBuilder: CacheKeyBuilder,
-    val cacheRepository: CacheRepository) {
+    val cacheRepository: CacheRepository,
+    val progressLoggerFactory: ProgressLoggerFactory,
+    val recompileScripts: Boolean) {
 
     private val logger = loggerFor<KotlinScriptPluginFactory>()
 
@@ -49,35 +52,31 @@ class CachingKotlinCompiler(
                                     classPath: ClassPath,
                                     parentClassLoader: ClassLoader): Class<*> {
         val buildscript = scriptFile.readText().substring(buildscriptRange)
-        return compileWithCache(cacheKeyPrefix + buildscript, classPath, parentClassLoader) { outputDir ->
-            compileKotlinScriptToDirectory(
-                outputDir,
-                buildscriptSectionFileFor(buildscript, outputDir),
-                scriptDefinitionFromTemplate(KotlinBuildScriptSection::class, classPath),
-                parentClassLoader, logger)
+        return compileWithCache(cacheKeyPrefix + buildscript, classPath, parentClassLoader) { cacheDir ->
+            ScriptCompilationSpec(
+                buildscriptSectionFileFor(buildscript, cacheDir),
+                KotlinBuildScriptSection::class,
+                scriptFile.name + " buildscript block")
         }
     }
 
     fun compileBuildScript(scriptFile: File, classPath: ClassPath, parentClassLoader: ClassLoader): Class<*> =
-        compileWithCache(cacheKeyPrefix + scriptFile, classPath, parentClassLoader) { outputDir ->
-            compileKotlinScriptToDirectory(
-                outputDir,
-                scriptFile,
-                scriptDefinitionFromTemplate(KotlinBuildScript::class, classPath),
-                parentClassLoader, logger)
+        compileWithCache(cacheKeyPrefix + scriptFile, classPath, parentClassLoader) {
+            ScriptCompilationSpec(scriptFile, KotlinBuildScript::class, scriptFile.name)
         }
 
     private fun compileWithCache(cacheKeySpec: CacheKeySpec,
                                  classPath: ClassPath,
                                  parentClassLoader: ClassLoader,
-                                 compileTo: (File) -> Class<*>): Class<*> {
+                                 compilationSpecFrom: (File) -> ScriptCompilationSpec): Class<*> {
         val cacheDir = cacheRepository
             .cache(cacheKeyFor(cacheKeySpec + parentClassLoader))
             .withProperties(mapOf("version" to "1"))
+            .let { if (recompileScripts) it.withValidator { false } else it }
             .withInitializer { cache ->
-                logger.info("Kotlin compilation classpath: {}", classPath)
                 val cacheDir = cache.baseDir
-                val scriptClass = compileTo(classesDirOf(cacheDir))
+                val scriptClass =
+                    compileTo(classesDirOf(cacheDir), compilationSpecFrom(cacheDir), classPath, parentClassLoader)
                 writeClassNameTo(cacheDir, scriptClass.name)
             }.open().run {
                 close()
@@ -86,8 +85,23 @@ class CachingKotlinCompiler(
         return loadClassFrom(classesDirOf(cacheDir), readClassNameFrom(cacheDir), parentClassLoader)
     }
 
+    data class ScriptCompilationSpec(val scriptFile: File, val scriptTemplate: KClass<out Any>, val description: String)
+
+    private fun compileTo(outputDir: File,
+                          spec: ScriptCompilationSpec,
+                          classPath: ClassPath,
+                          parentClassLoader: ClassLoader): Class<*> =
+        withProgressLoggingFor(spec.description) {
+            logger.info("Kotlin compilation classpath for {}: {}", spec.description, classPath)
+            compileKotlinScriptToDirectory(
+                outputDir,
+                spec.scriptFile,
+                scriptDefinitionFromTemplate(spec.scriptTemplate, classPath),
+                parentClassLoader, logger)
+        }
+
     private fun buildscriptSectionFileFor(buildscript: String, outputDir: File) =
-        File(outputDir.parentFile, "buildscript-section.gradle.kts").apply {
+        File(outputDir, "buildscript-section.gradle.kts").apply {
             writeText(buildscript)
         }
 
@@ -111,4 +125,15 @@ class CachingKotlinCompiler(
 
     private fun scriptDefinitionFromTemplate(template: KClass<out Any>, classPath: ClassPath) =
         KotlinScriptDefinitionFromAnnotatedTemplate(template, environment = mapOf("classPath" to classPath))
+
+    private fun <T> withProgressLoggingFor(description: String, action: () -> T): T {
+        val operation = progressLoggerFactory
+            .newOperation(javaClass)
+            .start("Compiling script into cache", "Compiling $description into local build cache")
+        try {
+            return action()
+        } finally {
+            operation.completed()
+        }
+    }
 }
