@@ -34,21 +34,37 @@ interface KotlinBuildScriptModel {
     val classPath: List<File>
 }
 
+internal
 object KotlinBuildScriptModelBuilder : ToolingModelBuilder {
 
     override fun canBuild(modelName: String): Boolean =
         modelName == "org.gradle.script.lang.kotlin.support.KotlinBuildScriptModel"
 
     override fun buildAll(modelName: String, project: Project): Any =
-        StandardKotlinBuildScriptModel(scriptCompilationClassPathOf(project))
+        StandardKotlinBuildScriptModel(classPathFrom(project))
+
+    private fun classPathFrom(project: Project): List<File> =
+        when (project.hasProperty(kotlinBuildScriptModelTarget)) {
+            true ->
+                project.property(kotlinBuildScriptModelTarget)
+                    .let { canonicalFile(it as String) }
+                    .let { scriptFile -> project.allprojects.find { it.buildFile == scriptFile } }
+                    ?.let { targetProject -> scriptCompilationClassPathOf(targetProject) }
+                    ?: scriptPluginClassPathOf(project)
+            else ->
+                scriptCompilationClassPathOf(project)
+        }
+
+    private fun canonicalFile(path: String): File = File(path).canonicalFile
 
     private fun scriptCompilationClassPathOf(project: Project): List<File> =
-        (scriptClassPathOf(project)
-        + buildSrcClassPathOf(project)
-        + gradleScriptKotlinApiOf(project))
+        scriptClassPathOf(project) + scriptPluginClassPathOf(project)
 
     private fun scriptClassPathOf(project: Project) =
         (project.buildscript as ScriptHandlerInternal).scriptClassPath.asFiles
+
+    private fun scriptPluginClassPathOf(project: Project) =
+        buildSrcClassPathOf(project) + gradleScriptKotlinApiOf(project)
 
     private fun buildSrcClassPathOf(project: Project) =
         ClasspathUtil
@@ -67,4 +83,8 @@ fun gradleScriptKotlinApiOf(project: Project): List<File> =
 
 internal
 fun kotlinScriptClassPathProviderOf(project: Project) =
-    (project as ProjectInternal).services[KotlinScriptClassPathProvider::class.java]!!
+    project.serviceOf<KotlinScriptClassPathProvider>()
+
+internal
+inline fun <reified T : Any> Project.serviceOf(): T =
+    (this as ProjectInternal).services[T::class.java]!!

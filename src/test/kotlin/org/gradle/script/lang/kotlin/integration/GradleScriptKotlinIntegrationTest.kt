@@ -4,7 +4,6 @@ import org.gradle.script.lang.kotlin.embeddedKotlinVersion
 import org.gradle.script.lang.kotlin.integration.fixture.DeepThought
 
 import org.hamcrest.CoreMatchers.containsString
-import org.hamcrest.CoreMatchers.hasItems
 import org.hamcrest.MatcherAssert.assertThat
 
 import org.junit.Test
@@ -197,76 +196,6 @@ class GradleScriptKotlinIntegrationTest : AbstractIntegrationTest() {
         assertThat(
             build("print-kotlin-version").output,
             containsString(differentKotlinVersion + "[compileKotlin=true, compileTestKotlin=true]"))
-    }
-
-    @Test
-    fun `can serve buildSrc classpath in face of compilation errors`() {
-
-        withBuildSrc()
-
-        withBuildScript("""
-            val p =
-        """)
-
-        assertBuildScriptModelClassPathContains(
-            buildSrcOutputFolder())
-    }
-
-    @Test
-    fun `can serve buildscript classpath in face of compilation errors`() {
-
-        withFile("classes.jar", "")
-
-        withBuildScript("""
-            buildscript {
-                dependencies {
-                    classpath(files("classes.jar"))
-                }
-            }
-
-            val p =
-        """)
-
-        assertBuildScriptModelClassPathContains(
-            existing("classes.jar"))
-    }
-
-    @Test
-    fun `can serve buildscript classpath of top level Groovy script`() {
-
-        //
-        // Supports code completion on build.gradle.kts files which have not
-        // been included in the build for whatever reason.
-        //
-        // An example would be a conditional `apply from: 'build.gradle.kts'`.
-        //
-
-        withBuildSrc()
-
-        withFile("classes.jar", "")
-
-        withFile("build.gradle", """
-            buildscript {
-                dependencies {
-                    classpath(files("classes.jar"))
-                }
-            }
-        """)
-
-        val classPath = kotlinBuildScriptModelCanonicalClassPath()
-        assertThat(
-            classPath,
-            hasItems(
-                buildSrcOutputFolder(),
-                existing("classes.jar")))
-
-        val version = "[0-9.]+(-.+?)?"
-        assertThat(
-            classPath.map { it.name },
-            hasItems(
-                matching("gradle-script-kotlin-$version\\.jar"),
-                matching("gradle-script-kotlin-api-$version\\.jar"),
-                matching("gradle-script-kotlin-extensions-$version\\.jar")))
     }
 
     @Test
